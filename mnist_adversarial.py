@@ -1,4 +1,3 @@
-import numpy as np
 from matplotlib import pyplot as plt
 import torch
 from torch import nn
@@ -6,16 +5,19 @@ from torch.nn import functional as F
 from torchvision import datasets, transforms
 from torch import utils
 import tensorflow as tf
+import numpy as np
 
 from cleverhans.attacks import FastGradientMethod
+from cleverhans.compat import flags
 from cleverhans.model import CallableModelWrapper
+from cleverhans.utils import AccuracyReport
 from cleverhans.utils_pytorch import convert_pytorch_model_to_tf
 
 
-def plot_predictions(images, labels):
-    for image, label in zip(images, labels):
+def plot_predictions(images, predicted_labels, true_labels):
+    for image, predicted_label, true_label in zip(images, predicted_labels, true_labels):
         plt.imshow(image[0], 'gray')
-        plt.title(str(label))
+        plt.title('P:{}, G:{}'.format(predicted_label, true_label))
         plt.show()
         plt.clf()
 
@@ -68,12 +70,12 @@ else:
 
 # load using datasets loader from torchvision
 train_loader = torch.utils.data.DataLoader(
-    datasets.MNIST('data', train=True, download=True,
-                   transform=transforms.ToTensor()),
+    datasets.FashionMNIST('data', train=True, download=True,
+                          transform=transforms.ToTensor()),
     batch_size=32, shuffle=True)
 
 test_loader = torch.utils.data.DataLoader(
-    datasets.MNIST('data', train=False, transform=transforms.ToTensor()),
+    datasets.FashionMNIST('data', train=False, transform=transforms.ToTensor()),
     batch_size=16)
 
 model = ConvNN()
@@ -97,7 +99,6 @@ for idx, (xs, ys) in enumerate(train_loader):
 
     if idx >= 10000:
         print(preds[0].argmax(), ys[0], loss.item())
-#         break
 
 # get test images
 test_set = next(iter(test_loader))
@@ -110,11 +111,11 @@ if gpu:
 
 # predict with untouched test images
 predicted_labels = model(test_images).argmax(dim=1).cpu().detach().numpy()
-plot_predictions(test_images[0:10].cpu().detach().numpy(), predicted_labels[0:10])
+plot_predictions(test_images[0:10].cpu().detach().numpy(), predicted_labels[0:10], test_labels[0:10].cpu().detach().numpy())
 
 native_adverserial_model = True
 adverserial_epochs = 100000
-info_range = 777
+info_range = 1477
 
 if native_adverserial_model:
 
@@ -146,7 +147,8 @@ if native_adverserial_model:
         adverserial_loss.backward()
         optimizer.step()
         if idx % info_range == 0:
-            plot_predictions(output_images[:1].cpu().detach().numpy(), preds[:1].argmax(dim=1).cpu().detach().numpy())
+            plot_predictions(output_images[:1].cpu().detach().numpy(), preds[:1].argmax(dim=1).cpu().detach().numpy(),
+                             test_labels[current_batch:current_batch + 1].cpu().detach().numpy())
             print('CNN Loss:{}, Closeness:{} Adverserial Loss:{}'.format(classifier_loss.item(), closeness.item(), adverserial_loss.item()))
 
 else:
@@ -160,7 +162,7 @@ else:
 
     # Create an FGSM attack
     fgsm_op = FastGradientMethod(cleverhans_model, sess=sess)
-    fgsm_params = {'eps': 0.3,
+    fgsm_params = {'eps': 0.025,
                    'clip_min': 0.,
                    'clip_max': 1.}
     adv_x_op = fgsm_op.generate(x_op, **fgsm_params)
@@ -176,7 +178,7 @@ else:
         correct += (np.argmax(adv_preds, axis=1) == test_labels[current_batch:current_batch + 1].cpu().detach().numpy()).sum()
         total += 1
         if idx % info_range == 0:
-            plot_predictions(avd_images[0:8], adv_preds[:8].argmax(axis=1))
+            plot_predictions(avd_images[0:8], adv_preds[:8].argmax(axis=1), test_labels[:8].cpu().detach().numpy())
             acc = float(correct) / total
             print('Adv accuracy: {:.3f}'.format(acc * 100))
 
